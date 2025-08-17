@@ -3,12 +3,24 @@
 #include <Wire.h>
 #include <Preferences.h>
 
+// Preference file Modes
+#define RW_MODE false
+#define RO_MODE true
+
+// I2C Adress
 #define DEFAULT_I2C_ADDRESS 0x10
 uint8_t i2cAddress = DEFAULT_I2C_ADDRESS;
 
 // Stepper setup (stepPin, dirPin)
 AccelStepper stepper(AccelStepper::DRIVER, 23, 22);
 ESP32Encoder encoder;
+
+/*EPROM Stored Data
+*Keys:
+* i2c_addr = device slave Adress
+* cal_offset = offset for motor calibraton
+* nvsInit = Initializer key
+*/
 Preferences prefs;
 
 long targetPosition = 0;
@@ -66,9 +78,21 @@ void setup() {
   Serial.begin(115200);
 
   // Load calibration
-  prefs.begin("motor", false);
-  i2cAddress = prefs.getUChar("i2c_addr", DEFAULT_I2C_ADDRESS);
-  calibrationOffset = prefs.getInt("cal_offset", 0);
+  prefs.begin("motor", RO_MODE);
+  bool tpInit  = prefs.isKey("nvsInit"); 
+  if (tpInit  == false) {
+    prefs.end();
+    prefs.begin("motor", RW_MODE);
+    //initialize preference keys with "factory default" values on first startup.
+    prefs.putUChar("i2c_addr", DEFAULT_I2C_ADDRESS);
+    prefs.putInt("cal_offset", 0);
+    prefs.putBool("nvsInit", true);          // Create the "already initialized Key"
+    prefs.end();                             // Close the namespace in RW mode and...
+    prefs.begin("motor", RO_MODE);        //  reopen it in RO mode
+   }
+
+  i2cAddress = prefs.getUChar("i2c_addr");
+  calibrationOffset = prefs.getInt("cal_offset");
   prefs.end();
 
   // Encoder
@@ -85,9 +109,12 @@ void setup() {
   Wire.onReceive(onReceive);
   Wire.onRequest(onRequest);
 
-
 }
 
 void loop() {
- //Loop
+ /*
+ * Check encoder Position
+ * Correct if needed
+ * wait for Instructions
+ */
 }

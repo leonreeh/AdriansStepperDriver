@@ -9,7 +9,7 @@ Commands are issued from the master and processed by the ESP32; responses (such 
 #define DEFAULT_I2C_ADDRESS 0x10
 uint8_t i2cAddress = DEFAULT_I2C_ADDRESS;
 ```
-The I²C address is configurable in firmware. Future support may allow runtime reconfiguration via command.  
+The I²C address is configurable in firmware for multiple devices.
 
 ---
 
