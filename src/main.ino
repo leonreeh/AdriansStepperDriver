@@ -3,17 +3,6 @@
 #include <Wire.h>
 #include <Preferences.h>
 
-// Preference file Modes
-#define RW_MODE false
-#define RO_MODE true
-
-// I2C Adress
-#define DEFAULT_I2C_ADDRESS 0x10
-uint8_t i2cAddress = DEFAULT_I2C_ADDRESS;
-
-// Stepper setup (stepPin, dirPin)
-AccelStepper stepper(AccelStepper::DRIVER, 23, 22);
-ESP32Encoder encoder;
 
 /*EPROM Stored Data
 *Keys:
@@ -22,6 +11,20 @@ ESP32Encoder encoder;
 * nvsInit = Initializer key
 */
 Preferences prefs;
+// Preference file Mode Masks
+#define RW_MODE false
+#define RO_MODE true
+
+// I2C Adress
+#define DEFAULT_I2C_ADDRESS 0x10
+#define SECOND_I2C_ADDRESS  0x11
+#define THIRD_I2C_ADDRESS   0x20
+#define FORTH_I2C_ADDRESS   0x21
+uint8_t i2cAddress = DEFAULT_I2C_ADDRESS;
+
+// Stepper setup (stepPin, dirPin)
+AccelStepper stepper(AccelStepper::DRIVER, 23, 22);
+ESP32Encoder encoder;
 
 long targetPosition = 0;
 long calibrationOffset = 0;
@@ -33,7 +36,6 @@ struct MotorStatus {
   uint16_t motor_state;
   uint16_t error_code;
 } status;
-
 
 /******************* I2C Interface ****************** */
 void onReceive(int numBytes) {
@@ -84,7 +86,7 @@ void setup() {
     prefs.end();
     prefs.begin("motor", RW_MODE);
     //initialize preference keys with "factory default" values on first startup.
-    prefs.putUChar("i2c_addr", DEFAULT_I2C_ADDRESS);
+    prefs.putUChar("i2c_addr", i2cAddress);
     prefs.putInt("cal_offset", 0);
     prefs.putBool("nvsInit", true);          // Create the "already initialized Key"
     prefs.end();                             // Close the namespace in RW mode and...
