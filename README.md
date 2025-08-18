@@ -20,8 +20,8 @@ It communicates with a **master device via I²C**, which sends motion commands a
 ## ⚙️ System Architecture
 
 ### Internal Modules
-- **Motor Control Core**
-  - Timer-driven step pulse generation
+- **Motion Profiles**
+  - Basic open-loop stepper motion
   - Trapezoidal acceleration/deceleration motion profiles
 - **Encoder Interface**
   - Quadrature decoding via ESP32 timers
@@ -40,10 +40,9 @@ It communicates with a **master device via I²C**, which sends motion commands a
 **Supported Commands:**
 - `0x01` → `CALIBRATE`
 - `0x02` → `SET_TARGET_ABS [position]`
-- `0x03` → `MOVE_REL [delta]`
-- `0x04` → `STOP`
-- `0x05` → `RESET`
-- `0x06` → `GET_STATUS`
+- `0x03` → `STOP`
+- `0x04` → `RESET`
+- `0x05` → `GET_STATUS`
 
 **Status Structure (I²C readback):**
 ```c
@@ -51,8 +50,8 @@ struct MotorStatus {
     int32_t actual_position;     // encoder count
     int32_t target_position;     // commanded position
     int32_t calibration_offset;  // zero reference
-    uint16_t motor_state;        // idle, moving, calibrating, error
-    uint16_t error_code;         // 0 = ok, 1 = stall, 2 = out-of-range
+    uint16_t motor_state;        // 0=idle, 1=moving, 2=calibrating, 3= error
+    uint16_t error_code;         // 0=ok, 1=stall, 2=out-of-range, 3= Calibration error, 4= tbd, 5= tbd, 6=comm error
 };
 ```
 
@@ -60,33 +59,30 @@ struct MotorStatus {
 
 ## 🛠️ Development Roadmap
 
-### Phase 1 – Core Setup
-- [ ] Timer-based step pulse generation
-- [ ] Encoder quadrature decoding
-- [ ] Basic open-loop stepper test
-
-### Phase 2 – Motion Profiles
+### Phase 1 – Motion Profiles
+- [ ] Basic open-loop stepper motion
 - [ ] Implement trapezoidal acceleration/deceleration
 - [ ] Track internal expected position counter
 
-### Phase 3 – Encoder Integration
+### Phase 2 – Encoder Integration
+- [ ] Encoder quadrature decoding
 - [ ] Periodic correction loop
 - [ ] Error handling for persistent mismatch
 
-### Phase 4 – Calibration
+### Phase 3 – Calibration
 - [ ] Stall-detection-based homing sequence
 - [ ] Save/load calibration offset from flash
 
-### Phase 5 – I²C Communication
-- [ ] Implement command parser
-- [ ] Implement status reporting
+### Phase 4 – I²C Communication
+- [/] Implement command parser
+- [/] Implement status reporting
 
-### Phase 6 – Safety & Reliability
+### Phase 5 – Safety & Reliability
 - [ ] Watchdog timer integration
 - [ ] Emergency stop
-- [ ] Error codes (stall, out-of-range, comm failure)
+- [ ] Error codes
 
-### Phase 7 – Integration Hell
+### Phase 6 – Integration Hell
 - [ ] Master device integration
 - [ ] Calibration validation
 
@@ -95,18 +91,9 @@ struct MotorStatus {
 ## 📂 Repository Structure (planned)
 ```
 /src
-  main.c
-  motor_control.c
-  motor_control.h
-  encoder.c
-  encoder.h
-  i2c_interface.c
-  i2c_interface.h
-  calibration.c
-  calibration.h
+  main.ino
 /docs
-  architecture.md
-  command_protocol.md
+I2C_Interface.md
 README.md
 ```
 
