@@ -58,8 +58,8 @@ struct MotorStatus {
     int32_t actual_position;     // Encoder count
     int32_t target_position;     // Commanded target
     int32_t calibration_offset;  // Zero reference
-    uint16_t motor_state;        // 0=idle, 1=moving, 2=calibrating, 3=error
-    uint16_t error_code;         // 0=ok, 1=stall, 2=out-of-range, 3=comm error
+    uint16_t motor_state;        // 0=idle, 1=moving, 2=calibrating, 3= error
+    uint16_t error_code;         // 0=ok, 1=stall, 2=out-of-range, 3= Calibration error, 4= tbd, 5= tbd, 6=comm error
 };
 ```
 **Total size:** 16 bytes  

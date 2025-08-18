@@ -26,9 +26,6 @@ uint8_t i2cAddress = DEFAULT_I2C_ADDRESS;
 AccelStepper stepper(AccelStepper::DRIVER, 23, 22);
 ESP32Encoder encoder;
 
-long targetPosition = 0;
-long calibrationOffset = 0;
-
 struct MotorStatus {
   int32_t actual_position;
   int32_t target_position;
@@ -37,7 +34,28 @@ struct MotorStatus {
   uint16_t error_code;
 } status;
 
-/******************* I2C Interface ****************** */
+// ---------------------
+// Function Prototypes
+// ---------------------
+void startCalibration();
+void setTarget(int32_t target);
+void stopMotor();
+void deviceReset();
+
+// ---------------------
+// Helper functions
+// ---------------------
+void initStatus();
+void initPreferences();
+void moveMotorSteps(int32_t steps, bool direction);
+bool detectStall();
+void updatePositionFromEncoder();
+void setError(uint16_t code);
+
+
+// ---------------------
+//  I2C Interface
+// ---------------------
 void onReceive(int numBytes) {
   uint8_t cmd = Wire.read();
   
@@ -47,7 +65,7 @@ void onReceive(int numBytes) {
       break;
 
     case 0x02: // Set Target
-      setTarget();
+      setTarget(0);
       break;
 
     case 0x03: //Stop Motor
@@ -63,8 +81,7 @@ void onReceive(int numBytes) {
       break;
     
     default:  // Unkown Command
-      //set error_code to communication error;
-      //report error to Master
+      setError(6);
       break;  
   }
 }
@@ -74,28 +91,15 @@ void onRequest() {
     Wire.write((uint8_t*)&status, sizeof(status));
   }
 }
-/******************* I2C Interface ****************** */
+
 
 void setup() {
+
   Serial.begin(115200);
 
-  // Load calibration
-  prefs.begin("motor", RO_MODE);
-  bool tpInit  = prefs.isKey("nvsInit"); 
-  if (tpInit  == false) {
-    prefs.end();
-    prefs.begin("motor", RW_MODE);
-    //initialize preference keys with "factory default" values on first startup.
-    prefs.putUChar("i2c_addr", i2cAddress);
-    prefs.putInt("cal_offset", 0);
-    prefs.putBool("nvsInit", true);          // Create the "already initialized Key"
-    prefs.end();                             // Close the namespace in RW mode and...
-    prefs.begin("motor", RO_MODE);        //  reopen it in RO mode
-   }
-
-  i2cAddress = prefs.getUChar("i2c_addr");
-  calibrationOffset = prefs.getInt("cal_offset");
-  prefs.end();
+  // Load Preferences & Status
+  initPreferences();
+  initStatus();
 
   // Encoder
   ESP32Encoder::useInternalWeakPullResistors = UP;
@@ -119,4 +123,92 @@ void loop() {
  * Correct if needed
  * wait for Instructions
  */
+  updatePositionFromEncoder();
+}
+
+// ---------------------
+// Function Implementations
+// ---------------------
+void startCalibration(){
+  /*
+   * Implement calibration routine:
+   * - set motor_state = calibrating
+   * - perform stall detection loop
+   * - validate multiple stall checks
+   * - write calibration_offset
+   * - return to idle
+   */
+}
+
+setTarget(int32_t target){
+  /*
+   * - Compare target with actual
+   * - Check if movement crosses calibration limit
+   * - Update struct
+   * - Move motor to target
+   * - Detect stall while moving
+   * - Update actual_position or set error
+   */
+}
+
+stopMotor(){
+
+}
+
+deviceReset(){
+    initPreferences();
+    initStatus();
+}
+
+
+// ---------------------
+// Helper Implementations
+// ---------------------
+void initStatus() {
+  prefs.begin("motor", RO_MODE);
+  status.actual_position   = 0; //read encoder position
+  status.target_position   = 0; //maybe add save function for last target
+  status.calibration_offset = prefs.getInt("cal_offset");
+  status.motor_state       = 0; // idle
+  status.error_code        = 0; // no error
+  prefs.end();
+}
+
+void initPreferences(){
+  prefs.begin("motor", RO_MODE);
+  bool tpInit  = prefs.isKey("nvsInit"); 
+  if (tpInit  == false) {
+    prefs.end();
+    prefs.begin("motor", RW_MODE);
+    //initialize preference keys with "factory default" values on first startup.
+    prefs.putUChar("i2c_addr", i2cAddress);
+    prefs.putInt("cal_offset", 0);
+    prefs.putBool("nvsInit", true);          // Create the "already initialized Key"
+    prefs.end();                             // Close the namespace in RW mode and...
+    prefs.begin("motor", RO_MODE);        //  reopen it in RO mode
+   }
+  i2cAddress = prefs.getUChar("i2c_addr");
+  prefs.end();
+}
+
+void moveMotorSteps(int32_t steps, bool direction) {
+  // 🔹 Placeholder for stepper control code
+  // steps = number of steps to move
+  // direction = true (CW), false (CCW)
+}
+
+bool detectStall() {
+  // 🔹 Placeholder: check encoder delta vs expected
+  // return true if stall detected
+  return false;
+}
+
+void updatePositionFromEncoder() {
+  // 🔹 Read encoder and update status.actual_position
+}
+
+void setError(uint16_t code) {
+  status.error_code = code;
+  status.motor_state = 3; // error
+  Wire.write((uint8_t*)&status, sizeof(status));
 }
