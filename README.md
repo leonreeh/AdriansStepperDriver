@@ -74,8 +74,8 @@ struct MotorStatus {
 - [ ] Save/load calibration offset from flash
 
 ### Phase 4 – I²C Communication
-- [/] Implement command parser
-- [/] Implement status reporting
+- [x] Implement command parser
+- [x] Implement status reporting
 
 ### Phase 5 – Safety & Reliability
 - [ ] Watchdog timer integration
