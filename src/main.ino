@@ -562,11 +562,11 @@ bool detectStall() {
 
   // Don’t flag when we’re basically not moving or already at target
   if (stepper.distanceToGo() == 0) {
-    s_badWindows = 0;                    // <-- fixed: no shadowing
+    s_badWindows = 0;                    
     return false;
   }
   if (fabsf(stepper.speed()) < STALL_IGNORE_SPEED_STEPS_S) {
-    s_badWindows = 0;                    // <-- fixed: no shadowing
+    s_badWindows = 0;                    
     return false;
   }
 
