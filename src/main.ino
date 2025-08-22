@@ -1,3 +1,42 @@
+/*
+ * ==============================================================
+ * Project:   AdriansNippleTwister (ESP32 Stepper Motor Controller I²C Slave)
+ * File:      main.ino
+ * Author:    Leon Reeh
+ * Created:   16.08.2025
+ * Platform:  ESP32 (Arduino Framework)
+ *
+ * Description:
+ *  This firmware implements a stepper motor controller with
+ *  encoder feedback, controlled over an I²C interface.
+ *  The ESP32 acts as an I²C slave device and executes commands
+ *  such as calibration, target positioning, stop, and reset.
+ *
+ * Features:
+ *  - Open-loop motion with periodic encoder corrections
+ *  - Stall detection for calibration and fault handling
+ *  - Configurable I²C slave address
+ *  - Status reporting via structured response
+ *
+ * Command Set (I²C):
+ *  0x01 → Calibrate Motor
+ *  0x02 → Set Target Position
+ *  0x03 → Stop Motor
+ *  0x04 → Reset Device
+ *  0x05 → Get Status (returns struct)
+ *
+ * Status Struct:
+ *  - actual_position
+ *  - target_position
+ *  - calibration_offset
+ *  - motor_state
+ *  - error_code
+ *
+ * License:   MIT
+ * ==============================================================
+ */
+
+
 #include <AccelStepper.h>
 #include <ESP32Encoder.h>
 #include <Wire.h>
@@ -36,14 +75,14 @@
 #define RW_MODE false
 #define RO_MODE true
 
-/*EPROM Stored Data
-*Keys:
-* i2c_addr = device slave Adress
-* cal_offset = offset for motor calibraton
-* nvsInit = Initializer key
-*/
+// ---------------------
+// EPROM Stored Data
+// ---------------------
 Preferences prefs;
 
+// ---------------------
+// Runtime Stored Data
+// ---------------------
 struct MotorStatus {
   int32_t actual_position;    // Encoder count
   int32_t target_position;    // Commanded target
@@ -52,7 +91,9 @@ struct MotorStatus {
   uint16_t error_code;        // 0=ok, 1=stall, 2=out-of-range, 3= Calibration error, 4= tbd, 5= tbd, 6=comm error
 } status;
 
-// Stepper setup (stepPin, dirPin)
+// ---------------------
+// Stepper setup
+// ---------------------
 AccelStepper stepper(AccelStepper::DRIVER, 23, 22);
 ESP32Encoder encoder;
 
@@ -74,7 +115,6 @@ bool detectStall();
 void updatePositionFromEncoder();
 void setError(uint16_t code);
 bool setState(uint16_t code);
-
 
 // ---------------------
 //  I2C Interface
@@ -119,7 +159,9 @@ void onRequest() {
   }
 }
 
-
+// ---------------------
+// Device setup
+// ---------------------
 void setup() {
 
   Serial.begin(115200);
@@ -144,6 +186,9 @@ void setup() {
 
 }
 
+// ---------------------
+// Main Loop / State Machine
+// ---------------------
 void loop() {
 
   uint16_t state = status.motor_state
