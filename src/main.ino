@@ -93,12 +93,6 @@ struct MotorStatus {
 } status;
 
 // ---------------------
-// Stepper setup
-// ---------------------
-AccelStepper stepper(AccelStepper::DRIVER, 23, 22);
-ESP32Encoder encoder;
-
-// ---------------------
 // Globals setup
 // ---------------------
 
@@ -130,6 +124,9 @@ static const int32_t  HOMING_MAX_TRAVEL_SLOW = 4000;  // safety: max steps allow
 static const int32_t  HOME_OFFSET_STEPS      = 150;   // logical zero should be this many steps away from the hard stop
 
 // -------- Encoder / Stepper tuning --------
+AccelStepper stepper(AccelStepper::DRIVER, 23, 22);
+ESP32Encoder encoder;
+
 #define ENC_A 34
 #define ENC_B 35
 static int32_t encoder_origin_offset = 0;
