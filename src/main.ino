@@ -116,8 +116,25 @@ static const float    STALL_IGNORE_SPEED_STEPS_S = 20.0; // don’t check at ver
 // Set this to your mechanics (e.g. if encoder is on shaft: counts per step; if on output: include gearing).
 static const float    ENC_COUNTS_PER_STEPPER_STEP = 1.0f; // <- (e.g., if your encoder yields 4 counts per motor step → set to 4.0f; if gear-down encoder, include the gear ratio).
 
+// -------- Calibration / Homing tuning --------
+static const bool     HOMING_TOWARD_MIN      = true;  // true = move in negative direction to hit the hard stop
+static const int32_t  HOMING_FAST_MAX_SPEED  = 1200;  // steps/s during fast seek
+static const int32_t  HOMING_SLOW_MAX_SPEED  = 300;   // steps/s during slow seek
+static const int32_t  HOMING_ACCEL           = 400;   // steps/s^2 for both passes
 
+static const int32_t  HOMING_BACKOFF_STEPS   = 400;   // steps to back off after first stall
+static const uint32_t HOMING_STALL_SETTLE_MS = 150;   // pause between phases after stall
+static const int32_t  HOMING_MAX_TRAVEL_FAST = 20000; // safety: max steps allowed in fast pass without stall
+static const int32_t  HOMING_MAX_TRAVEL_SLOW = 4000;  // safety: max steps allowed in slow pass without stall
+static const int32_t  HOME_OFFSET_STEPS      = 150;   // logical zero should be this many steps away from the hard stop
 
+// -------- Encoder / Stepper tuning --------
+#define ENC_A 34
+#define ENC_B 35
+static int32_t encoder_origin_offset = 0;
+static int32_t MaxSpeed              = 1000;
+static int32_t MaxAcceleration       = 200;
+static const int32_t MAX_RANGE_STEPS = 12000;  // absolute max from logical zero (inclusive)
 
 // ---------------------
 // State Function Prototypes
@@ -142,7 +159,7 @@ void initStatus();
 void initPreferences();
 void updatePositionFromEncoder();
 void deviceReset();
-
+inline int32_t clampTargetToRange(int32_t tgt);
 
 // ---------------------
 //  I2C Interface
@@ -162,19 +179,22 @@ void onReceive(int numBytes) {
       break;
 
     case 0x02: { // Set Target
-      if (numBytes >= 5) {  
-        // Read 4 bytes for target (int32_t, little endian)
+      if (numBytes >= 5) {
         int32_t target = 0;
-        for (int i = 0; i < 4; i++) {
-          target |= ((int32_t)Wire.read() & 0xFF) << (8 * i);
-        }
+        for (int i = 0; i < 4; i++) target |= ((int32_t)Wire.read() & 0xFF) << (8 * i);
+        // HARD REJECT out of bounds:
+        if (target < 0 || target > MAX_RANGE_STEPS) {
+           setError(ERR_OUT_OF_RANGE); 
+           break; 
+          }
         setTarget(target);
         setState(SM_MOVING);
-      } else {
-        setError(ERR_COM); // Not enough data received
-      }
-      break;
-    }
+        } else {
+        setError(ERR_COM);
+        }
+        break;
+}
+
 
     case 0x03: // Stop Motor
       stopMotor();
@@ -215,12 +235,12 @@ void setup() {
 
   // Encoder
   ESP32Encoder::useInternalWeakPullResistors = UP;
-  encoder.attachHalfQuad(34, 35); // A, B pins
+  encoder.attachHalfQuad(ENC_A, ENC_B); // A, B pins
   encoder.clearCount();
 
   // Stepper
-  stepper.setMaxSpeed(1000);
-  stepper.setAcceleration(200);
+  stepper.setMaxSpeed(MaxSpeed);
+  stepper.setAcceleration(MaxAcceleration);
 
   // I2C
  Wire.begin((int)i2cAddress);  // I2C slave address
@@ -294,19 +314,168 @@ void idleMotor() {
   // If correction completed → stay idle
   if (stepper.distanceToGo() == 0) {
     updatePositionFromEncoder();
+      // Persist last known absolute position
+    prefs.begin("motor", RW_MODE);
+    prefs.putInt("last_pos", status.actual_position);
+    prefs.end();
+
+    setState(SM_IDLE);
+    return;
   }
 }
 
-void startCalibration(){
-  /*
-   * Implement calibration routine:
-   * - set motor_state = calibrating
-   * - perform stall detection loop
-   * - validate multiple stall checks
-   * - write calibration_offset
-   * - return to idle
-   */
+void startCalibration() {
+  enum CalPhase : uint8_t {
+    CAL_INIT = 0,
+    CAL_FAST_SEEK,
+    CAL_WAIT_AFTER_STALL1,
+    CAL_BACKOFF,
+    CAL_WAIT_AFTER_BACKOFF,
+    CAL_SLOW_SEEK,
+    CAL_WAIT_AFTER_STALL2,
+    CAL_MOVE_TO_OFFSET,   
+    CAL_SET_ZERO,         
+    CAL_DONE,
+    CAL_FAIL
+  };
+
+  static CalPhase   phase = CAL_INIT;
+  static uint32_t   tMark = 0;
+  static int32_t    startStepAtPhase = 0;
+  static int32_t    dirSign = 0;
+  static int32_t    savedMaxSpeed = 0;
+  static int32_t    savedAccel    = 0;
+
+  auto resetPhase = [&]() {
+    phase = CAL_INIT;
+    tMark = 0;
+  };
+
+  auto moveTowardDir = [&](int32_t farSteps) {
+    int32_t target = stepper.currentPosition() + (dirSign * farSteps);
+    stepper.moveTo(target);
+  };
+
+  updatePositionFromEncoder();
+
+  switch (phase) {
+    case CAL_INIT: {
+      status.motor_state = SM_CALIBRATING;
+      status.error_code  = 0;
+
+      savedMaxSpeed = stepper.maxSpeed();
+      savedAccel    = stepper.acceleration();
+
+      dirSign = HOMING_TOWARD_MIN ? -1 : +1;
+
+      stepper.setMaxSpeed(HOMING_FAST_MAX_SPEED);
+      stepper.setAcceleration(HOMING_ACCEL);
+
+      moveTowardDir(HOMING_MAX_TRAVEL_FAST * 2);
+      startStepAtPhase = stepper.currentPosition();
+      phase = CAL_FAST_SEEK;
+      break;
+    }
+
+    case CAL_FAST_SEEK: {
+      stepper.run();
+      int32_t travel = abs(stepper.currentPosition() - startStepAtPhase);
+      if (travel > HOMING_MAX_TRAVEL_FAST) { phase = CAL_FAIL; break; }
+      if (detectStall()) { tMark = millis(); phase = CAL_WAIT_AFTER_STALL1; }
+      break;
+    }
+
+    case CAL_WAIT_AFTER_STALL1: {
+      if (millis() - tMark < HOMING_STALL_SETTLE_MS) { stepper.run(); break; }
+      stepper.setMaxSpeed(HOMING_SLOW_MAX_SPEED);
+      // Backoff opposite homing direction to unload the stop
+      stepper.moveTo(stepper.currentPosition() + (-dirSign * HOMING_BACKOFF_STEPS));
+      phase = CAL_BACKOFF;
+      break;
+    }
+
+    case CAL_BACKOFF: {
+      stepper.run();
+      if (stepper.distanceToGo() == 0) { tMark = millis(); phase = CAL_WAIT_AFTER_BACKOFF; }
+      break;
+    }
+
+    case CAL_WAIT_AFTER_BACKOFF: {
+      if (millis() - tMark < HOMING_STALL_SETTLE_MS) { stepper.run(); break; }
+      stepper.setMaxSpeed(HOMING_SLOW_MAX_SPEED);
+      stepper.setAcceleration(HOMING_ACCEL);
+      moveTowardDir(HOMING_MAX_TRAVEL_SLOW * 2);
+      startStepAtPhase = stepper.currentPosition();
+      phase = CAL_SLOW_SEEK;
+      break;
+    }
+
+    case CAL_SLOW_SEEK: {
+      stepper.run();
+      int32_t travel = abs(stepper.currentPosition() - startStepAtPhase);
+      if (travel > HOMING_MAX_TRAVEL_SLOW) { phase = CAL_FAIL; break; }
+      if (detectStall()) { tMark = millis(); phase = CAL_WAIT_AFTER_STALL2; }
+      break;
+    }
+
+    case CAL_WAIT_AFTER_STALL2: {
+      if (millis() - tMark < HOMING_STALL_SETTLE_MS) { stepper.run(); break; }
+      // NEW: Move away from the stop by HOME_OFFSET_STEPS and set zero THERE
+      stepper.setMaxSpeed(HOMING_SLOW_MAX_SPEED);
+      stepper.moveTo(stepper.currentPosition() + (-dirSign * HOME_OFFSET_STEPS));
+      phase = CAL_MOVE_TO_OFFSET;
+      break;
+    }
+
+    case CAL_MOVE_TO_OFFSET: {
+      stepper.run();
+      if (stepper.distanceToGo() == 0) {
+        phase = CAL_SET_ZERO;
+      }
+      break;
+    }
+
+    case CAL_SET_ZERO: {
+      // Set logical zero here (HOME_OFFSET_STEPS away from the hard stop)
+      encoder.clearCount();
+      encoder_origin_offset = 0;
+      status.actual_position = 0;
+      status.target_position = 0;
+      status.calibration_offset = 0;
+
+      stepper.setCurrentPosition(0);
+
+      // Persist "we are at logical zero"
+      prefs.begin("motor", RW_MODE);
+      prefs.putInt("cal_offset", status.calibration_offset); // remains 0
+      prefs.putInt("last_pos", 0);                           // we are at zero now
+      prefs.end();
+
+      // Restore motion profile
+      stepper.setMaxSpeed(savedMaxSpeed);
+      stepper.setAcceleration(savedAccel);
+
+      phase = CAL_DONE;
+      break;
+    }
+
+    case CAL_DONE: {
+      setState(SM_IDLE);
+      resetPhase();
+      return;
+    }
+
+    case CAL_FAIL: {
+      stopMotor();
+      setError(ERR_CAL);
+      stepper.setMaxSpeed(savedMaxSpeed);
+      stepper.setAcceleration(savedAccel);
+      resetPhase();
+      return;
+    }
+  }
 }
+
 
 void moveMotor() {
 
@@ -333,7 +502,13 @@ void moveMotor() {
 
   // Reached target? -> go idle
   if (stepper.distanceToGo() == 0) {
-    setState(SM_IDLE);
+  // Persist last known absolute position
+  prefs.begin("motor", RW_MODE);
+  prefs.putInt("last_pos", status.actual_position);
+  prefs.end();
+
+  setState(SM_IDLE);
+  return;
   }
 }
 
@@ -347,10 +522,7 @@ void stopMotor() {
 // Transition Function Implementations
 // ---------------------
 void setTarget(int32_t target) {
-  // Update status
-  status.target_position = target;
-
-  // Update state
+  status.target_position = clampTargetToRange(target);
   status.motor_state = SM_MOVING;
 }
 
@@ -432,7 +604,6 @@ bool detectStall() {
   return false;
 }
 
-
 bool setState(uint16_t code){
   //Update motor state for state machine
   // Return true if OK return false if state is locked
@@ -457,12 +628,20 @@ void setError(uint16_t code) {
 // ---------------------
 void initStatus() {
   prefs.begin("motor", RO_MODE);
-  status.actual_position   = 0; //read encoder position
-  status.target_position   = 0; //maybe add save function for last target
-  status.calibration_offset = prefs.getInt("cal_offset");
-  status.motor_state       = SM_STOP; // idle
-  status.error_code        = 0; // no error
+  int32_t last_pos = prefs.getInt("last_pos", 0);   // absolute steps from logical zero
+  status.actual_position    = last_pos;             // logical position
+  status.target_position    = last_pos;             // keep target = where we are
+  status.calibration_offset = prefs.getInt("cal_offset", 0); // stays 0 in this scheme
+  status.motor_state        = SM_STOP;
+  status.error_code         = 0;
   prefs.end();
+
+  // Encoder is incremental and starts at 0 on boot.
+  // Tie logical position to fresh encoder counts via an origin offset:
+  encoder_origin_offset = last_pos;
+
+  // Keep AccelStepper coordinate frame aligned with logical frame
+  stepper.setCurrentPosition(last_pos);
 }
 
 void initPreferences(){
@@ -474,6 +653,7 @@ void initPreferences(){
     //initialize preference keys with "factory default" values on first startup.
     prefs.putUChar("i2c_addr", i2cAddress);
     prefs.putInt("cal_offset", 0);
+    prefs.putInt("last_pos",0);
     prefs.putBool("nvsInit", true);          // Create the "already initialized Key"
     prefs.end();                             // Close the namespace in RW mode and...
     prefs.begin("motor", RO_MODE);        //  reopen it in RO mode
@@ -483,10 +663,17 @@ void initPreferences(){
 }
 
 void updatePositionFromEncoder() {
-  status.actual_position = (int32_t)encoder.getCount();
+  // logical position = offset at boot (or after homing) + live encoder counts
+  status.actual_position = encoder_origin_offset + (int32_t)encoder.getCount();
 }
 
 void deviceReset(){
     initPreferences();
     initStatus();
+}
+
+inline int32_t clampTargetToRange(int32_t tgt) {
+  const int32_t minBound = 0;                  // logical zero boundary
+  // (Optional) add a maxBound if you have a physical max
+  return (tgt < minBound) ? minBound : tgt;
 }

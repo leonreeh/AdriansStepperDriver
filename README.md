@@ -64,13 +64,13 @@ struct MotorStatus {
 - [x] Track internal expected position counter
 
 ### Phase 2 – Encoder Integration
-- [ ] Encoder quadrature decoding
+- [x] Encoder quadrature decoding
 - [x] Periodic correction loop
-- [ ] Error handling for persistent mismatch
+- [x] Error handling for persistent mismatch
 
 ### Phase 3 – Calibration
-- [ ] Stall-detection-based homing sequence
-- [ ] Save/load calibration offset from flash
+- [x] Stall-detection-based homing sequence
+- [x] Save/load calibration offset from flash
 
 ### Phase 4 – I²C Communication
 - [x] Implement command parser
@@ -78,7 +78,7 @@ struct MotorStatus {
 
 ### Phase 5 – Safety & Reliability
 - [x] Emergency stop
-- [ ] Stall detection
+- [x] Stall detection
 - [x] Error codes
 
 ### Phase 6 – Integration Hell
