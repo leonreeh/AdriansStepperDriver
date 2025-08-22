@@ -98,8 +98,9 @@ struct MotorStatus {
   main.ino
   UARTDebugger.hts
 /docs
-  I2C_Interface.md
   README.md
+  I2C_Interface.md
+  Configuration & Tuning Guide.md
 ```
 
 ---
