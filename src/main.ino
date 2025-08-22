@@ -111,15 +111,15 @@ void stopMotor();
 // ---------------------
 void setTarget(int32_t target);
 bool setState(uint16_t code);
+void setError(uint16_t code);
+bool detectStall();
 
 // ---------------------
 // Helper functions
 // ---------------------
 void initStatus();
 void initPreferences();
-bool detectStall();
 void updatePositionFromEncoder();
-void setError(uint16_t code);
 void deviceReset();
 
 
@@ -130,24 +130,37 @@ uint8_t i2cAddress = DEFAULT_I2C_ADDRESS; // Device Adress
 uint8_t lastCommand = 0;
 
 void onReceive(int numBytes) {
+  if (numBytes < 1) return;  // Nothing to read
+
   lastCommand = Wire.read();
-  
-  switch(lastCommand) {
+  uint8_t cmd = lastCommand;
+
+  switch(cmd) {
     case 0x01: // Calibrate
       setState(SM_CALIBRATING);
       break;
 
-    case 0x02: // Set Target
-      setTarget(0);
-      setState(SM_MOVING);
+    case 0x02: { // Set Target
+      if (numBytes >= 5) {  
+        // Read 4 bytes for target (int32_t, little endian)
+        int32_t target = 0;
+        for (int i = 0; i < 4; i++) {
+          target |= ((int32_t)Wire.read() & 0xFF) << (8 * i);
+        }
+        setTarget(target);
+        setState(SM_MOVING);
+      } else {
+        setError(ERR_COM); // Not enough data received
+      }
       break;
+    }
 
-    case 0x03: //Stop Motor
+    case 0x03: // Stop Motor
       stopMotor();
       setState(SM_STOP);
       break;
 
-    case 0x04: //Reset Device
+    case 0x04: // Reset Device
       deviceReset();
       break;
 
@@ -155,11 +168,12 @@ void onReceive(int numBytes) {
       // handled in onRequest
       break;
     
-    default:  // Unkown Command
+    default:  // Unknown Command
       setError(ERR_COM);
       break;  
   }
 }
+
 
 void onRequest() {
   if (lastCommand == 0x05) {
@@ -232,13 +246,34 @@ void loop() {
 // ---------------------
 // State Function Implementations
 // ---------------------
-void idleMotor(){
+void idleMotor() {
   updatePositionFromEncoder();
-  /* Function goal: incase the motor is moved by outside forces correct its position
-  * - If actual positiom matches target position with in x tolereance do nothing
-  * - if actual positiom mismatches target position outside of x tolereance correct position
-  * - this function should rarely do anything
-  */
+
+  // Define acceptable tolerance in steps
+  const int32_t tolerance = 5;  
+
+  // Calculate error between actual and target
+  int32_t error = status.target_position - status.actual_position;
+
+  // If within tolerance → do nothing
+  if (abs(error) <= tolerance) {
+    return;
+  }
+
+  // If outside tolerance → correct position
+  stepper.moveTo(status.target_position);
+  stepper.run();
+
+  // 🔹 Stall detection (placeholder for now)
+  if (detectStall()) {
+    setError(ERR_STALL);
+    return;
+  }
+
+  // If correction completed → stay idle
+  if (stepper.distanceToGo() == 0) {
+    updatePositionFromEncoder();
+  }
 }
 
 void startCalibration(){
@@ -287,6 +322,12 @@ void setTarget(int32_t target) {
   status.motor_state = SM_MOVING;
 }
 
+bool detectStall() {
+  // 🔹 Placeholder: check encoder delta vs expected
+  // return true if stall detected
+  return false;
+}
+
 bool setState(uint16_t code){
   //Update motor state for state machine
   // Return true if OK return false if state is locked
@@ -299,6 +340,11 @@ bool setState(uint16_t code){
     status.motor_state = code; 
     return true;
   } 
+}
+
+void setError(uint16_t code) {
+  status.error_code = code;
+  status.motor_state = SM_ERROR; // error
 }
 
 // ---------------------
@@ -331,19 +377,8 @@ void initPreferences(){
   prefs.end();
 }
 
-bool detectStall() {
-  // 🔹 Placeholder: check encoder delta vs expected
-  // return true if stall detected
-  return false;
-}
-
 void updatePositionFromEncoder() {
   status.actual_position = (int32_t)encoder.getCount();
-}
-
-void setError(uint16_t code) {
-  status.error_code = code;
-  status.motor_state = SM_ERROR; // error
 }
 
 void deviceReset(){

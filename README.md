@@ -60,13 +60,12 @@ struct MotorStatus {
 ## 🛠️ Development Roadmap
 
 ### Phase 1 – Motion Profiles
-- [ ] Basic open-loop stepper motion
-- [ ] Implement trapezoidal acceleration/deceleration
-- [ ] Track internal expected position counter
+- [x] Basic Closed-loop stepper motion
+- [x] Track internal expected position counter
 
 ### Phase 2 – Encoder Integration
 - [ ] Encoder quadrature decoding
-- [ ] Periodic correction loop
+- [x] Periodic correction loop
 - [ ] Error handling for persistent mismatch
 
 ### Phase 3 – Calibration
@@ -78,7 +77,7 @@ struct MotorStatus {
 - [x] Implement status reporting
 
 ### Phase 5 – Safety & Reliability
-- [ ] Emergency stop
+- [x] Emergency stop
 - [ ] Stall detection
 - [x] Error codes
 
