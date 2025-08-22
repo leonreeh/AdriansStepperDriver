@@ -26,7 +26,7 @@ The I²C address is configurable in firmware for multiple devices.
 ### 0x02 – SET_TARGET
 - **Direction**: Master → Slave  
 - **Payload**: 4 bytes (signed 32-bit int, little endian)  
-  - New absolute target position in encoder counts.  
+  - New target position in encoder counts.  
 - **Action**: Motor moves to target position using open-loop motion with encoder correction.  
 - **Response**: none  
 

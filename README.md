@@ -39,7 +39,7 @@ It communicates with a **master device via I²C**, which sends motion commands a
 ### External Interface (I²C Master ↔ ESP32)
 **Supported Commands:**
 - `0x01` → `CALIBRATE`
-- `0x02` → `SET_TARGET_ABS [position]`
+- `0x02` → `SET_TARGET [position]`
 - `0x03` → `STOP`
 - `0x04` → `RESET`
 - `0x05` → `GET_STATUS`
@@ -50,7 +50,7 @@ struct MotorStatus {
     int32_t actual_position;     // encoder count
     int32_t target_position;     // commanded position
     int32_t calibration_offset;  // zero reference
-    uint16_t motor_state;        // 0=idle, 1=moving, 2=calibrating, 3= error
+    uint16_t motor_state;        // 0=idle, 1=moving, 2=calibrating, 3= error, 4= stop
     uint16_t error_code;         // 0=ok, 1=stall, 2=out-of-range, 3= Calibration error, 4= tbd, 5= tbd, 6=comm error
 };
 ```
@@ -78,9 +78,9 @@ struct MotorStatus {
 - [x] Implement status reporting
 
 ### Phase 5 – Safety & Reliability
-- [ ] Watchdog timer integration
 - [ ] Emergency stop
-- [ ] Error codes
+- [ ] Stall detection
+- [x] Error codes
 
 ### Phase 6 – Integration Hell
 - [ ] Master device integration
@@ -88,7 +88,7 @@ struct MotorStatus {
 
 ---
 
-## 📂 Repository Structure (planned)
+## 📂 Repository Structure
 ```
 /src
   main.ino
