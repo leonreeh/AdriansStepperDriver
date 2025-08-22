@@ -40,6 +40,7 @@
 #include <AccelStepper.h>
 #include <ESP32Encoder.h>
 #include <Wire.h>
+#include <math.h>
 #include <Preferences.h>
 
 // ---------------------
@@ -132,8 +133,8 @@ static const int32_t  HOME_OFFSET_STEPS      = 150;   // logical zero should be 
 #define ENC_A 34
 #define ENC_B 35
 static int32_t encoder_origin_offset = 0;
-static int32_t MaxSpeed              = 1000;
-static int32_t MaxAcceleration       = 200;
+static float MaxSpeed        = 1000.0f;
+static float MaxAcceleration = 200.0f;
 static const int32_t MAX_RANGE_STEPS = 12000;  // absolute max from logical zero (inclusive)
 
 // ---------------------
@@ -178,24 +179,23 @@ void onReceive(int numBytes) {
       setState(SM_CALIBRATING);
       break;
 
-    case 0x02: { // Set Target
+    case 0x02:  // Set Target
       if (numBytes >= 5) {
         int32_t target = 0;
         for (int i = 0; i < 4; i++) target |= ((int32_t)Wire.read() & 0xFF) << (8 * i);
-        // HARD REJECT out of bounds:
+
+        // HARD REJECT (kept as you wrote it)
         if (target < 0 || target > MAX_RANGE_STEPS) {
-           setError(ERR_OUT_OF_RANGE); 
-           break; 
-          }
-        setTarget(target);
-        setState(SM_MOVING);
-        } else {
-        setError(ERR_COM);
+          setError(ERR_OUT_OF_RANGE);
+          break;
         }
-        break;
-}
 
-
+        setTarget(target);
+      } else {
+        setError(ERR_COM);
+      }
+      break;
+    
     case 0x03: // Stop Motor
       stopMotor();
       setState(SM_STOP);
@@ -294,7 +294,8 @@ void idleMotor() {
   const int32_t tolerance = 5;  
 
   // Calculate error between actual and target
-  int32_t error = status.target_position - status.actual_position;
+  int32_t tgt = clampTargetToRange(status.target_position);
+  int32_t error = tgt - status.actual_position;
 
   // If within tolerance → do nothing
   if (abs(error) <= tolerance) {
@@ -302,7 +303,7 @@ void idleMotor() {
   }
 
   // If outside tolerance → correct position
-  stepper.moveTo(status.target_position);
+  stepper.moveTo(tgt);
   stepper.run();
 
   // 🔹 Stall detection (placeholder for now)
@@ -343,8 +344,8 @@ void startCalibration() {
   static uint32_t   tMark = 0;
   static int32_t    startStepAtPhase = 0;
   static int32_t    dirSign = 0;
-  static int32_t    savedMaxSpeed = 0;
-  static int32_t    savedAccel    = 0;
+  static float      savedMaxSpeed = 0;
+  static float      savedAccel    = 0;
 
   auto resetPhase = [&]() {
     phase = CAL_INIT;
@@ -476,10 +477,9 @@ void startCalibration() {
   }
 }
 
-
 void moveMotor() {
 
-  int32_t target = status.target_position;
+  int32_t target = clampTargetToRange(status.target_position);
 
   // Only (re)prime the move when the target changes
   if (!primed || target != lastTarget) {
@@ -513,9 +513,15 @@ void moveMotor() {
 }
 
 void stopMotor() {
-  stepper.stop();         // Stop movement as soon as possible
-  stepper.setSpeed(0);    // Ensure speed is 0
-  stepper.run();          // Process the stop
+  stepper.stop();
+  stepper.setSpeed(0);
+  stepper.run();
+  primed = false;
+  
+  updatePositionFromEncoder();
+  prefs.begin("motor", RW_MODE);
+  prefs.putInt("last_pos", status.actual_position);
+  prefs.end();
 }
 
 // ---------------------
@@ -523,6 +529,7 @@ void stopMotor() {
 // ---------------------
 void setTarget(int32_t target) {
   status.target_position = clampTargetToRange(target);
+  primed = false;                
   status.motor_state = SM_MOVING;
 }
 
@@ -534,7 +541,7 @@ bool detectStall() {
     s_badWindows = 0;
     return false;
   }
-  if (fabs(stepper.speed()) < STALL_IGNORE_SPEED_STEPS_S) {
+  if (fabsf(stepper.speed()) < STALL_IGNORE_SPEED_STEPS_S) {
     // Too slow to reliably judge movement—reset counters and skip
     static uint8_t s_badWindows = 0;
     s_badWindows = 0;
@@ -673,7 +680,7 @@ void deviceReset(){
 }
 
 inline int32_t clampTargetToRange(int32_t tgt) {
-  const int32_t minBound = 0;                  // logical zero boundary
-  // (Optional) add a maxBound if you have a physical max
-  return (tgt < minBound) ? minBound : tgt;
+  if (tgt < 0) return 0;
+  if (tgt > MAX_RANGE_STEPS) return MAX_RANGE_STEPS;
+  return tgt;
 }
