@@ -174,28 +174,32 @@ void onReceive(int numBytes) {
   lastCommand = Wire.read();
   uint8_t cmd = lastCommand;
 
-  switch(cmd) {
+  switch (cmd) {
     case 0x01: // Calibrate
       setState(SM_CALIBRATING);
       break;
 
-    case 0x02:  // Set Target
+    case 0x02: { // Set Target
       if (numBytes >= 5) {
         int32_t target = 0;
         for (int i = 0; i < 4; i++) target |= ((int32_t)Wire.read() & 0xFF) << (8 * i);
 
-        // HARD REJECT (kept as you wrote it)
+        // Drain any extra bytes just in case the master sent more than 4
+        while (Wire.available()) (void)Wire.read();
+
+        // HARD REJECT (kept as-is)
         if (target < 0 || target > MAX_RANGE_STEPS) {
           setError(ERR_OUT_OF_RANGE);
           break;
         }
 
-        setTarget(target);
+        setTarget(target);   // sets SM_MOVING + resets priming
       } else {
         setError(ERR_COM);
       }
       break;
-    
+    }
+
     case 0x03: // Stop Motor
       stopMotor();
       setState(SM_STOP);
@@ -208,12 +212,13 @@ void onReceive(int numBytes) {
     case 0x05: // Get Status
       // handled in onRequest
       break;
-    
+
     default:  // Unknown Command
       setError(ERR_COM);
-      break;  
+      break;
   }
 }
+
 
 
 void onRequest() {
@@ -478,7 +483,6 @@ void startCalibration() {
 }
 
 void moveMotor() {
-
   int32_t target = clampTargetToRange(status.target_position);
 
   // Only (re)prime the move when the target changes
@@ -494,35 +498,43 @@ void moveMotor() {
   // Keep status in sync with reality
   updatePositionFromEncoder();
 
-  // Stall detection hook (placeholder for now)
+  // Stall detection hook
   if (detectStall()) {
     setError(ERR_STALL);
     return;
   }
 
-  // Reached target? -> go idle
+  // Reached target? -> go idle and persist
   if (stepper.distanceToGo() == 0) {
-  // Persist last known absolute position
-  prefs.begin("motor", RW_MODE);
-  prefs.putInt("last_pos", status.actual_position);
-  prefs.end();
+    prefs.begin("motor", RW_MODE);
+    prefs.putInt("last_pos", status.actual_position);
+    prefs.end();
 
-  setState(SM_IDLE);
-  return;
+    primed = false;          // <-- reset priming on arrival
+    setState(SM_IDLE);
+    return;
   }
 }
 
+
 void stopMotor() {
+  static int32_t lastSaved = INT32_MIN;
+
   stepper.stop();
   stepper.setSpeed(0);
   stepper.run();
   primed = false;
-  
+
   updatePositionFromEncoder();
-  prefs.begin("motor", RW_MODE);
-  prefs.putInt("last_pos", status.actual_position);
-  prefs.end();
+
+  if (status.actual_position != lastSaved) {
+    prefs.begin("motor", RW_MODE);
+    prefs.putInt("last_pos", status.actual_position);
+    prefs.end();
+    lastSaved = status.actual_position;
+  }
 }
+
 
 // ---------------------
 // Transition Function Implementations
@@ -534,32 +546,28 @@ void setTarget(int32_t target) {
 }
 
 bool detectStall() {
-  // Don’t flag when we’re basically not moving or already at target
-  if (stepper.distanceToGo() == 0) {
-    // Reset internal counters and allow normal completion
-    static uint8_t s_badWindows = 0;
-    s_badWindows = 0;
-    return false;
-  }
-  if (fabsf(stepper.speed()) < STALL_IGNORE_SPEED_STEPS_S) {
-    // Too slow to reliably judge movement—reset counters and skip
-    static uint8_t s_badWindows = 0;
-    s_badWindows = 0;
-    return false;
-  }
-
   // State across calls
   static uint32_t s_lastTs      = 0;
   static int32_t  s_lastStepPos = 0;
   static int32_t  s_lastEncPos  = 0;
   static uint8_t  s_badWindows  = 0;
 
+  // Don’t flag when we’re basically not moving or already at target
+  if (stepper.distanceToGo() == 0) {
+    s_badWindows = 0;                    // <-- fixed: no shadowing
+    return false;
+  }
+  if (fabsf(stepper.speed()) < STALL_IGNORE_SPEED_STEPS_S) {
+    s_badWindows = 0;                    // <-- fixed: no shadowing
+    return false;
+  }
+
   uint32_t now = millis();
   if (s_lastTs == 0) {
     // Prime on first call
     s_lastTs      = now;
     s_lastStepPos = stepper.currentPosition();
-    s_lastEncPos  = status.actual_position; // ensure updatePositionFromEncoder() ran
+    s_lastEncPos  = status.actual_position;
     s_badWindows  = 0;
     return false;
   }
@@ -581,11 +589,11 @@ bool detectStall() {
 
   // Ignore tiny moves (accel/decel edges)
   if (expectedSteps < STALL_MIN_EXPECTED_STEPS) {
-    s_badWindows = 0; // don’t penalize
+    s_badWindows = 0;
     return false;
   }
 
-  // Scale encoder counts to "equivalent motor steps" so we can compare apples-to-apples
+  // Scale encoder counts to equivalent motor steps
   float encAsSteps = (ENC_COUNTS_PER_STEPPER_STEP > 0.0f)
                      ? (encCounts / ENC_COUNTS_PER_STEPPER_STEP)
                      : 0.0f;
@@ -597,19 +605,18 @@ bool detectStall() {
   if (ratio < STALL_MIN_RATIO) {
     if (s_badWindows < 255) s_badWindows++;
   } else {
-    // Healthy movement resets the counter
     s_badWindows = 0;
   }
 
   // Too many consecutive bad windows => stall
   if (s_badWindows >= STALL_CONSECUTIVE_WINDOWS) {
-    // Reset for next time and report stall
     s_badWindows = 0;
     return true;
   }
 
   return false;
 }
+
 
 bool setState(uint16_t code){
   //Update motor state for state machine
