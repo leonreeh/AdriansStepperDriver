@@ -97,34 +97,42 @@ struct MotorStatus {
 AccelStepper stepper(AccelStepper::DRIVER, 23, 22);
 ESP32Encoder encoder;
 
+
 // ---------------------
-// Function Prototypes
+// State Function Prototypes
 // ---------------------
 void startCalibration();
-void setTarget(int32_t target);
+void idleMotor();
+void moveMotor();
 void stopMotor();
-void deviceReset();
+
+// ---------------------
+// Transition Function Prototypes
+// ---------------------
+void setTarget(int32_t target);
+bool setState(uint16_t code);
 
 // ---------------------
 // Helper functions
 // ---------------------
 void initStatus();
 void initPreferences();
-void moveMotorSteps(int32_t steps, bool direction);
 bool detectStall();
 void updatePositionFromEncoder();
 void setError(uint16_t code);
-bool setState(uint16_t code);
+void deviceReset();
+
 
 // ---------------------
 //  I2C Interface
 // ---------------------
 uint8_t i2cAddress = DEFAULT_I2C_ADDRESS; // Device Adress
+uint8_t lastCommand = 0;
 
 void onReceive(int numBytes) {
-  uint8_t cmd = Wire.read();
+  lastCommand = Wire.read();
   
-  switch(cmd) {
+  switch(lastCommand) {
     case 0x01: // Calibrate
       setState(SM_CALIBRATING);
       break;
@@ -180,7 +188,7 @@ void setup() {
   stepper.setAcceleration(200);
 
   // I2C
-  Wire.begin(i2cAddress);  // I2C slave address
+ Wire.begin((int)i2cAddress);  // I2C slave address
   Wire.onReceive(onReceive);
   Wire.onRequest(onRequest);
 
@@ -191,16 +199,16 @@ void setup() {
 // ---------------------
 void loop() {
 
-  uint16_t state = status.motor_state
+  uint16_t state = status.motor_state;
 
   switch (state)
   {
   case SM_IDLE:
-    updatePositionFromEncoder();
+    idleMotor();
     break;
 
   case SM_MOVING:
-    /* code */
+    moveMotor();
     break;
 
   case SM_CALIBRATING:
@@ -222,8 +230,17 @@ void loop() {
 }
 
 // ---------------------
-// Function Implementations
+// State Function Implementations
 // ---------------------
+void idleMotor(){
+  updatePositionFromEncoder();
+  /* Function goal: incase the motor is moved by outside forces correct its position
+  * - If actual positiom matches target position with in x tolereance do nothing
+  * - if actual positiom mismatches target position outside of x tolereance correct position
+  * - this function should rarely do anything
+  */
+}
+
 void startCalibration(){
   /*
    * Implement calibration routine:
@@ -235,26 +252,54 @@ void startCalibration(){
    */
 }
 
-setTarget(int32_t target){
-  /*
-   * - Compare target with actual
-   * - Check if movement crosses calibration limit
-   * - Update struct
-   * - Move motor to target
-   * - Detect stall while moving
-   * - Update actual_position or set error
-   */
+void moveMotor(){
+  int32_t target = status.target_position;
+  // Tell AccelStepper to move relative to current position
+  stepper.moveTo(target);
+  // Run stepper toward target
+  stepper.run();
+
+  // Update encoder feedback
+  updatePositionFromEncoder();
+
+  // Check if we've arrived at target
+  if (stepper.distanceToGo() == 0) {
+    setState(SM_IDLE);
+  }
+
+  // 🔹 Stall detection and correction will go here later
 }
 
-stopMotor(){
-
+void stopMotor() {
+  stepper.stop();         // Stop movement as soon as possible
+  stepper.setSpeed(0);    // Ensure speed is 0
+  stepper.run();          // Process the stop
 }
 
-deviceReset(){
-    initPreferences();
-    initStatus();
+// ---------------------
+// Transition Function Implementations
+// ---------------------
+void setTarget(int32_t target) {
+  // Update status
+  status.target_position = target;
+
+  // Update state
+  status.motor_state = SM_MOVING;
 }
 
+bool setState(uint16_t code){
+  //Update motor state for state machine
+  // Return true if OK return false if state is locked
+  uint16_t cur_state = status.motor_state;
+  if (cur_state == SM_ERROR)
+  {
+    return false; //error can only be cleared via deviceReset
+  }
+  else{
+    status.motor_state = code; 
+    return true;
+  } 
+}
 
 // ---------------------
 // Helper Implementations
@@ -286,12 +331,6 @@ void initPreferences(){
   prefs.end();
 }
 
-void moveMotorSteps(int32_t steps, bool direction) {
-  // 🔹 Placeholder for stepper control code
-  // steps = number of steps to move
-  // direction = true (CW), false (CCW)
-}
-
 bool detectStall() {
   // 🔹 Placeholder: check encoder delta vs expected
   // return true if stall detected
@@ -299,26 +338,15 @@ bool detectStall() {
 }
 
 void updatePositionFromEncoder() {
-  // 🔹 Read encoder and update status.actual_position
-}
-
-bool setState(uint16_t code){
-  //Update motor state for state machine
-  // Return true if OK return false if state is locked
-  cur_state = status.motor_state
-  if (cur_state == SM_ERROR)
-  {
-    return false; //error can only be cleared via deviceReset
-  }
-  else{
-    status.motor_state = code; 
-    return true;
-  }
-  
+  status.actual_position = (int32_t)encoder.getCount();
 }
 
 void setError(uint16_t code) {
   status.error_code = code;
   status.motor_state = SM_ERROR; // error
-  Wire.write((uint8_t*)&status, sizeof(status));
+}
+
+void deviceReset(){
+    initPreferences();
+    initStatus();
 }
