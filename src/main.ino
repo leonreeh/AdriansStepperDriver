@@ -97,6 +97,27 @@ struct MotorStatus {
 AccelStepper stepper(AccelStepper::DRIVER, 23, 22);
 ESP32Encoder encoder;
 
+// ---------------------
+// Globals setup
+// ---------------------
+
+//Motion Control 
+static bool primed = false;
+static int32_t lastTarget = 0;
+
+// -------- Stall detection tuning --------
+static const uint16_t STALL_WINDOW_MS            = 25;   // sampling window
+static const int32_t  STALL_MIN_EXPECTED_STEPS   = 2;    // ignore tiny moves per window
+static const float    STALL_MIN_RATIO            = 0.30; // encoder / expected (scaled), below -> suspect   (Increase to be stricter)
+static const uint8_t  STALL_CONSECUTIVE_WINDOWS  = 6;    // how many bad windows in a row => stall (~150ms) (Increase to be less sensetive)
+static const float    STALL_IGNORE_SPEED_STEPS_S = 20.0; // don’t check at very low speeds
+
+// How many encoder counts correspond to ONE motor *step*.
+// Set this to your mechanics (e.g. if encoder is on shaft: counts per step; if on output: include gearing).
+static const float    ENC_COUNTS_PER_STEPPER_STEP = 1.0f; // <- (e.g., if your encoder yields 4 counts per motor step → set to 4.0f; if gear-down encoder, include the gear ratio).
+
+
+
 
 // ---------------------
 // State Function Prototypes
@@ -287,22 +308,33 @@ void startCalibration(){
    */
 }
 
-void moveMotor(){
+void moveMotor() {
+
   int32_t target = status.target_position;
-  // Tell AccelStepper to move relative to current position
-  stepper.moveTo(target);
-  // Run stepper toward target
+
+  // Only (re)prime the move when the target changes
+  if (!primed || target != lastTarget) {
+    stepper.moveTo(target);
+    primed = true;
+    lastTarget = target;
+  }
+
+  // Advance motion
   stepper.run();
 
-  // Update encoder feedback
+  // Keep status in sync with reality
   updatePositionFromEncoder();
 
-  // Check if we've arrived at target
+  // Stall detection hook (placeholder for now)
+  if (detectStall()) {
+    setError(ERR_STALL);
+    return;
+  }
+
+  // Reached target? -> go idle
   if (stepper.distanceToGo() == 0) {
     setState(SM_IDLE);
   }
-
-  // 🔹 Stall detection and correction will go here later
 }
 
 void stopMotor() {
@@ -323,10 +355,83 @@ void setTarget(int32_t target) {
 }
 
 bool detectStall() {
-  // 🔹 Placeholder: check encoder delta vs expected
-  // return true if stall detected
+  // Don’t flag when we’re basically not moving or already at target
+  if (stepper.distanceToGo() == 0) {
+    // Reset internal counters and allow normal completion
+    static uint8_t s_badWindows = 0;
+    s_badWindows = 0;
+    return false;
+  }
+  if (fabs(stepper.speed()) < STALL_IGNORE_SPEED_STEPS_S) {
+    // Too slow to reliably judge movement—reset counters and skip
+    static uint8_t s_badWindows = 0;
+    s_badWindows = 0;
+    return false;
+  }
+
+  // State across calls
+  static uint32_t s_lastTs      = 0;
+  static int32_t  s_lastStepPos = 0;
+  static int32_t  s_lastEncPos  = 0;
+  static uint8_t  s_badWindows  = 0;
+
+  uint32_t now = millis();
+  if (s_lastTs == 0) {
+    // Prime on first call
+    s_lastTs      = now;
+    s_lastStepPos = stepper.currentPosition();
+    s_lastEncPos  = status.actual_position; // ensure updatePositionFromEncoder() ran
+    s_badWindows  = 0;
+    return false;
+  }
+
+  // Only evaluate once per window
+  if ((now - s_lastTs) < STALL_WINDOW_MS) return false;
+
+  // Calculate deltas in this window
+  int32_t stepNow = stepper.currentPosition();
+  int32_t encNow  = status.actual_position;
+
+  int32_t expectedSteps = abs(stepNow - s_lastStepPos);
+  int32_t encCounts     = abs(encNow  - s_lastEncPos);
+
+  // Move the window forward
+  s_lastTs      = now;
+  s_lastStepPos = stepNow;
+  s_lastEncPos  = encNow;
+
+  // Ignore tiny moves (accel/decel edges)
+  if (expectedSteps < STALL_MIN_EXPECTED_STEPS) {
+    s_badWindows = 0; // don’t penalize
+    return false;
+  }
+
+  // Scale encoder counts to "equivalent motor steps" so we can compare apples-to-apples
+  float encAsSteps = (ENC_COUNTS_PER_STEPPER_STEP > 0.0f)
+                     ? (encCounts / ENC_COUNTS_PER_STEPPER_STEP)
+                     : 0.0f;
+
+  // Ratio of observed (encoder) to expected (stepper) movement
+  float ratio = (expectedSteps > 0) ? (encAsSteps / (float)expectedSteps) : 1.0f;
+
+  // Judge this window
+  if (ratio < STALL_MIN_RATIO) {
+    if (s_badWindows < 255) s_badWindows++;
+  } else {
+    // Healthy movement resets the counter
+    s_badWindows = 0;
+  }
+
+  // Too many consecutive bad windows => stall
+  if (s_badWindows >= STALL_CONSECUTIVE_WINDOWS) {
+    // Reset for next time and report stall
+    s_badWindows = 0;
+    return true;
+  }
+
   return false;
 }
+
 
 bool setState(uint16_t code){
   //Update motor state for state machine
