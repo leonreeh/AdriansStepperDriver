@@ -83,9 +83,9 @@ struct MotorStatus {
 - ✅ I²C command parser and status reporting
 - ✅ Stall detection logic
 - ✅ Soft travel limits
+- ✅ Diagnostic tools via UART/USB
 
 ### Next Steps
-- [ ] Diagnostic tools via UART/USB
 - [ ] Extended error handling & self-tests
 - [ ] Integration Hell
 
