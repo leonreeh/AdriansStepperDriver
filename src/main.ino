@@ -740,7 +740,7 @@ void handleSerial() {
             break;
 
           default:   // Unknown
-            setError(ERR_COM);
+            //setError(ERR_COM);
             break;
         }
         break;

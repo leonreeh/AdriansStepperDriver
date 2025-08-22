@@ -96,6 +96,7 @@ struct MotorStatus {
 ```
 /src
   main.ino
+  UARTDebugger.hts
 /docs
   I2C_Interface.md
   README.md

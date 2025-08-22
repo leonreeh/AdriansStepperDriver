@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<HtermSequenceFile name="Hterm Sequence File" version="0.8.9">
+  <ItemList>
+    <SequenceItem name="Calibrate (0x01)">
+      <sequence value="h[01]"/>
+      <description></description>
+    </SequenceItem>
+    <SequenceItem name="Stop (0x03)">
+      <sequence value="h[03]"/>
+      <description></description>
+    </SequenceItem>
+    <SequenceItem name="Reset (0x04)">
+      <sequence value="h[04]"/>
+      <description></description>
+    </SequenceItem>
+    <SequenceItem name="Get Status (0x05)">
+      <sequence value="h[05]"/>
+      <description></description>
+    </SequenceItem>
+    <SequenceItem name="Set Target 0 (0x02)">
+      <sequence value="h[02] h[00] h[00] h[00] h[00]"/>
+      <description></description>
+    </SequenceItem>
+    <SequenceItem name="Set Target 5 (0x02)">
+      <sequence value="h[02] h[05] h[00] h[00] h[00]"/>
+      <description></description>
+    </SequenceItem>
+    <SequenceItem name="Set Target 1000 (0x02)">
+      <sequence value="h[02] h[e8] h[03] h[00] h[00]"/>
+      <description></description>
+    </SequenceItem>
+    <SequenceItem name="Set Target 10000 (0x02)">
+      <sequence value="h[02] h[10] h[27] h[00] h[00]"/>
+      <description></description>
+    </SequenceItem>
+    <SequenceItem name="Set Target 12000 (MAX) (0x02)">
+      <sequence value="h[02] h[e0] h[2e] h[00] h[00]"/>
+      <description></description>
+    </SequenceItem>
+    <SequenceItem name="Set Target 25000 (OOR) (0x02)">
+      <sequence value="h[02] h[a8] h[61] h[00] h[00]"/>
+      <description></description>
+    </SequenceItem>
+    <SequenceItem name="Set Target -1 (OOR) (0x02)">
+      <sequence value="h[02] h[ff] h[ff] h[ff] h[ff]"/>
+      <description></description>
+    </SequenceItem>
+    <SequenceItem name="Set Target 20000 (OOR) (0x02)">
+      <sequence value="h[02] h[20] h[4e] h[00] h[00]"/>
+      <description></description>
+    </SequenceItem>
+  </ItemList>
+</HtermSequenceFile>
