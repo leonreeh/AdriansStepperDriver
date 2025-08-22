@@ -220,12 +220,23 @@ void onReceive(int numBytes) {
 }
 
 
-
 void onRequest() {
   if (lastCommand == 0x05) {
     Wire.write((uint8_t*)&status, sizeof(status));
   }
 }
+
+// ---------------------
+// UART Debug Interface
+// ---------------------
+#define ENABLE_SERIAL_CONSOLE 1   // set to 0 to compile out
+
+#if ENABLE_SERIAL_CONSOLE
+// Small RX state-machine for binary UART commands
+enum UartRxState : uint8_t { U_WAIT_CMD = 0, U_READ_SET_TARGET_4 };
+void handleSerial();               // poll & parse UART commands
+#endif
+
 
 // ---------------------
 // Device setup
@@ -258,6 +269,9 @@ void setup() {
 // Main Loop / State Machine
 // ---------------------
 void loop() {
+  #if ENABLE_SERIAL_CONSOLE
+  handleSerial();   // non-blocking UART parser
+  #endif
 
   uint16_t state = status.motor_state;
 
@@ -691,3 +705,67 @@ inline int32_t clampTargetToRange(int32_t tgt) {
   if (tgt > MAX_RANGE_STEPS) return MAX_RANGE_STEPS;
   return tgt;
 }
+
+#if ENABLE_SERIAL_CONSOLE
+void handleSerial() {
+  static UartRxState rxState = U_WAIT_CMD;
+  static int32_t tempTarget = 0;
+  static uint8_t byteIndex = 0;
+
+  while (Serial.available() > 0) {
+    uint8_t b = (uint8_t)Serial.read();
+
+    switch (rxState) {
+      case U_WAIT_CMD: {
+        switch (b) {
+          case 0x01: // CALIBRATE
+            setState(SM_CALIBRATING);
+            break;
+
+          case 0x02: // SET_TARGET (expect 4 LE bytes next)
+            rxState = U_READ_SET_TARGET_4;
+            tempTarget = 0;
+            byteIndex = 0;
+            break;
+
+          case 0x03: // STOP
+            stopMotor();
+            setState(SM_STOP);
+            break;
+
+          case 0x04: // RESET
+            deviceReset();
+            break;
+
+          case 0x05: // GET_STATUS
+            // Write the same struct layout as I²C
+            Serial.write((uint8_t*)&status, sizeof(status));
+            break;
+
+          default:   // Unknown
+            setError(ERR_COM);
+            break;
+        }
+        break;
+      }
+
+      case U_READ_SET_TARGET_4: {
+        tempTarget |= ((int32_t)b & 0xFF) << (8 * byteIndex);
+        byteIndex++;
+
+        if (byteIndex >= 4) {
+          // Same bounds behavior as I²C path:
+          if (tempTarget < 0 || tempTarget > MAX_RANGE_STEPS) {
+            setError(ERR_OUT_OF_RANGE);   // hard reject to mirror your I²C behavior
+          } else {
+            setTarget(tempTarget);        // sets SM_MOVING + resets primed
+          }
+          // Return to waiting for next command byte
+          rxState = U_WAIT_CMD;
+        }
+        break;
+      }
+    } // switch rxState
+  }   // while available
+}
+#endif
