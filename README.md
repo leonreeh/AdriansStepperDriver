@@ -103,8 +103,3 @@ struct MotorStatus {
 
 ---
 
-## 🚀 Future Improvements
-- UART diagnostics for tuning and debugging
-- Multiple axis support
-- Improved motion planning (S-curve, lookahead)
-- Field-updatable configuration for max speed, acceleration, and limits
