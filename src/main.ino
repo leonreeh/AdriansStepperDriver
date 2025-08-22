@@ -216,7 +216,6 @@ void onReceive(int numBytes) {
   }
 }
 
-
 void onRequest() {
   if (lastCommand == 0x05) {
     Wire.write((uint8_t*)&status, sizeof(status));
@@ -527,7 +526,6 @@ void moveMotor() {
   }
 }
 
-
 void stopMotor() {
   static int32_t lastSaved = INT32_MIN;
 
@@ -545,7 +543,6 @@ void stopMotor() {
     lastSaved = status.actual_position;
   }
 }
-
 
 // ---------------------
 // Transition Function Implementations
@@ -627,7 +624,6 @@ bool detectStall() {
 
   return false;
 }
-
 
 bool setState(uint16_t code){
   //Update motor state for state machine
