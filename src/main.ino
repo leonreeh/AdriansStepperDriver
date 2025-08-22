@@ -3,6 +3,38 @@
 #include <Wire.h>
 #include <Preferences.h>
 
+// ---------------------
+// State Machine Masks
+// ---------------------
+#define SM_IDLE         0
+#define SM_MOVING       1
+#define SM_CALIBRATING  2
+#define SM_ERROR        3
+#define SM_STOP         4
+
+// ---------------------
+// Error Code Masks
+// ---------------------
+#define ERR_STALL         1
+#define ERR_OUT_OF_RANGE  2
+#define ERR_CAL           3
+#define ERR_TBD1          4
+#define ERR_TBD2          5
+#define ERR_COM           6
+
+// ---------------------
+// I2C Adress Masks
+// ---------------------
+#define DEFAULT_I2C_ADDRESS 0x10
+#define SECOND_I2C_ADDRESS  0x11
+#define THIRD_I2C_ADDRESS   0x20
+#define FORTH_I2C_ADDRESS   0x21
+
+// ---------------------
+// Preference Mode Masks
+// ---------------------
+#define RW_MODE false
+#define RO_MODE true
 
 /*EPROM Stored Data
 *Keys:
@@ -11,28 +43,18 @@
 * nvsInit = Initializer key
 */
 Preferences prefs;
-// Preference file Mode Masks
-#define RW_MODE false
-#define RO_MODE true
 
-// I2C Adress
-#define DEFAULT_I2C_ADDRESS 0x10
-#define SECOND_I2C_ADDRESS  0x11
-#define THIRD_I2C_ADDRESS   0x20
-#define FORTH_I2C_ADDRESS   0x21
-uint8_t i2cAddress = DEFAULT_I2C_ADDRESS;
+struct MotorStatus {
+  int32_t actual_position;    // Encoder count
+  int32_t target_position;    // Commanded target
+  int32_t calibration_offset; // Zero reference
+  uint16_t motor_state;       // 0=idle, 1=moving, 2=calibrating, 3= error, 4 = Stop
+  uint16_t error_code;        // 0=ok, 1=stall, 2=out-of-range, 3= Calibration error, 4= tbd, 5= tbd, 6=comm error
+} status;
 
 // Stepper setup (stepPin, dirPin)
 AccelStepper stepper(AccelStepper::DRIVER, 23, 22);
 ESP32Encoder encoder;
-
-struct MotorStatus {
-  int32_t actual_position;
-  int32_t target_position;
-  int32_t calibration_offset;
-  uint16_t motor_state;
-  uint16_t error_code;
-} status;
 
 // ---------------------
 // Function Prototypes
@@ -51,25 +73,30 @@ void moveMotorSteps(int32_t steps, bool direction);
 bool detectStall();
 void updatePositionFromEncoder();
 void setError(uint16_t code);
+bool setState(uint16_t code);
 
 
 // ---------------------
 //  I2C Interface
 // ---------------------
+uint8_t i2cAddress = DEFAULT_I2C_ADDRESS; // Device Adress
+
 void onReceive(int numBytes) {
   uint8_t cmd = Wire.read();
   
   switch(cmd) {
     case 0x01: // Calibrate
-      startCalibration();
+      setState(SM_CALIBRATING);
       break;
 
     case 0x02: // Set Target
       setTarget(0);
+      setState(SM_MOVING);
       break;
 
     case 0x03: //Stop Motor
       stopMotor();
+      setState(SM_STOP);
       break;
 
     case 0x04: //Reset Device
@@ -81,7 +108,7 @@ void onReceive(int numBytes) {
       break;
     
     default:  // Unkown Command
-      setError(6);
+      setError(ERR_COM);
       break;  
   }
 }
@@ -118,12 +145,35 @@ void setup() {
 }
 
 void loop() {
- /*
- * Check encoder Position
- * Correct if needed
- * wait for Instructions
- */
-  updatePositionFromEncoder();
+
+  uint16_t state = status.motor_state
+
+  switch (state)
+  {
+  case SM_IDLE:
+    updatePositionFromEncoder();
+    break;
+
+  case SM_MOVING:
+    /* code */
+    break;
+
+  case SM_CALIBRATING:
+    startCalibration();
+    break;
+
+  case SM_ERROR:
+    stopMotor();
+    break;
+
+  case SM_STOP:
+    stopMotor();
+    break;
+
+  default:
+    break;
+  }
+
 }
 
 // ---------------------
@@ -169,7 +219,7 @@ void initStatus() {
   status.actual_position   = 0; //read encoder position
   status.target_position   = 0; //maybe add save function for last target
   status.calibration_offset = prefs.getInt("cal_offset");
-  status.motor_state       = 0; // idle
+  status.motor_state       = SM_STOP; // idle
   status.error_code        = 0; // no error
   prefs.end();
 }
@@ -207,8 +257,23 @@ void updatePositionFromEncoder() {
   // 🔹 Read encoder and update status.actual_position
 }
 
+bool setState(uint16_t code){
+  //Update motor state for state machine
+  // Return true if OK return false if state is locked
+  cur_state = status.motor_state
+  if (cur_state == SM_ERROR)
+  {
+    return false; //error can only be cleared via deviceReset
+  }
+  else{
+    status.motor_state = code; 
+    return true;
+  }
+  
+}
+
 void setError(uint16_t code) {
   status.error_code = code;
-  status.motor_state = 3; // error
+  status.motor_state = SM_ERROR; // error
   Wire.write((uint8_t*)&status, sizeof(status));
 }
