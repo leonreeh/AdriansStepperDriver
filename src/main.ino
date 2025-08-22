@@ -239,7 +239,7 @@ void setup() {
   initStatus();
 
   // Encoder
-  ESP32Encoder::useInternalWeakPullResistors = UP;
+  ESP32Encoder::useInternalWeakPullResistors = puType::up;
   encoder.attachHalfQuad(ENC_A, ENC_B); // A, B pins
   encoder.clearCount();
 
