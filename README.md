@@ -1,4 +1,4 @@
-# AdriansNippleTwister
+# AdriansStepperDriver
 
 ## 📌 Overview
 This project implements firmware for an **ESP32-based stepper motor controller** with **encoder feedback**.  
